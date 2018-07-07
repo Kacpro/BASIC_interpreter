@@ -1,10 +1,11 @@
 import re
 
+# function for parsing BASIC command
 def parse_basic(line):
     return re.match("^(\\d+)\\s+(\\S+)\\s*(.*)", line)
 
 
-
+#function for loading an existing project
 def load(file):
     global program
     global repeat_stack
@@ -20,8 +21,9 @@ def load(file):
     fd = open(file, "r")
     for line in fd:
         res = parse_basic(line)
-        program[res.group(1)] = (res.group(2), res.group(3))
+        program[int(res.group(1))] = (res.group(2), res.group(3))
     fd.close()
+
 
 
 def basic_input(args):
@@ -44,13 +46,13 @@ def basic_print(args):
             print(res.group(1))
         else:
             res = re.match("^\s*(.+)\s*", args)
-            print((lambda x: for_iterators[x] if x in for_iterators.keys() else globals()[x])(res.group(1)))
+            print(vars_to_vals_for(res.group(1)))
 
 
 
 def basic_goto(args):
     res = re.match("^\s*(\d+)\s*", args)
-    return res.group(1)
+    return int(res.group(1))
 
 
 
@@ -59,20 +61,21 @@ def basic_let(args):
     buf = res.group(2)
     buf = vars_to_vals_for(buf)
     buf = vars_to_vals(buf)
-    globals()[res.group(1)] = str(eval(buf)) #globals()[res.group(2)] if res.group(2) in globals().keys() else res.group(2)
+    globals()[res.group(1)] = str(eval(buf))
 
 
 
-def basic_if(args):
-    args = vars_to_vals(args)
+def basic_if(args, line):
+    args = vars_to_vals_for(args)
 
     res = re.match("^\s*(.+)\s+then\s+(.+)\s+else\s+(.+)\s*", args)
     if res != None:
-        if (eval(res.group(1))): return execute((res.group(2)[:res.group(2).find(' ')], res.group(2)[res.group(2).find(' ') + 1:]))
-        else: return execute((res.group(3)[:res.group(3).find(' ')], res.group(3)[res.group(3).find(' ') + 1:]))
+        if eval(vars_to_vals_for(res.group(1))): return execute((res.group(2)[:res.group(2).find(' ')], res.group(2)[res.group(2).find(' ') + 1:]), line)
+        else: return execute((res.group(3)[:res.group(3).find(' ')], res.group(3)[res.group(3).find(' ') + 1:]), line)
     else:
         res = re.match("^\s*(.+)\s+then\s+(.+)\s*", args)
-        if eval(res.group(1)): return execute((res.group(2)[:res.group(2).find(' ')], res.group(2)[res.group(2).find(' ') + 1:]))
+        if eval(vars_to_vals_for(res.group(1))):
+            return execute((res.group(2)[:res.group(2).find(' ')], res.group(2)[res.group(2).find(' ') + 1:]), line)
         else: return 0
 
 
@@ -82,20 +85,36 @@ def basic_repeat(line):
     repeat_stack.append(line)
 
 
-
+#function for changing variables in expression to corresponding values
 def vars_to_vals(args):
     global program
-    r = re.search("([^\d\s]+)", args)
+    r = re.search("([^\d\s/+\-*%()=!]+)", args)
     args_copy = ""
-    while r != None and args_copy != args:
+    while args_copy != args:
+        if r == None: break
         args_copy = args[:]
         if r.group(1) in globals().keys():
-            args = re.sub("([^\d\s]+)", globals()[r.group(1)], args, 1)
-        r = re.search("([^\d\s]+)", args)
+            args = re.sub("([^\d\s/+\-*%()=!]+)", globals()[r.group(1)], args, 1)
+        r = re.search("([^\d\s/+\-*%()=!]+)", args)
     return args
 
 
+#function for changing variables in expression to corresponding values from 'for' iterators
+def vars_to_vals_for(args):
+    global program
+    global for_iterators
+    r = re.search("([^\d\s/+\-*%()=!]+)", args)
+    args_copy = ""
+    while args_copy != args:
+        if r == None: break
+        args_copy = args[:]
+        if r.group(1) in for_iterators.keys():
+            args = re.sub("([^\d\s/+\-*%()=!]+)", for_iterators[r.group(1)], args, 1)
+        r = re.search("([^\d\s/+\-*%()=!]+)", args)
+    return vars_to_vals(args)
 
+
+#function for finding next line with command given in an argument ignoring nested encounters
 def find_statement(line, statement, ignore):
     global program
     prog_list = [*program]
@@ -114,7 +133,7 @@ def find_statement(line, statement, ignore):
 
 def basic_until(args):
     global repeat_stack
-    args = vars_to_vals(args)
+    args = vars_to_vals_for(args)
     if eval(args):
         repeat_stack.pop()
         return 0
@@ -124,7 +143,7 @@ def basic_until(args):
 
 def basic_while(args, line):
     global while_stack
-    args = vars_to_vals(args)
+    args = vars_to_vals_for(args)
     if eval(args):
         while_stack.append(line)
         return 0
@@ -141,25 +160,11 @@ def basic_wend():
 
 
 
-def vars_to_vals_for(args):
-    global program
-    global for_iterators
-    r = re.search("([^\d\s\\\\+\-*]+)", args)
-    args_copy = ""
-    while args_copy != args:
-        if r == None: break
-        args_copy = args[:]
-        if r.group(1) in for_iterators.keys():
-            args = re.sub("([^\d\s\\\\+\-*]+)", for_iterators[r.group(1)], args, 1)
-        r = re.search("([^\d\s\\\\+\-*]+)", args)
-    return vars_to_vals(args)
-
-
 
 def basic_for(args, line):
     global for_stack
     global for_iterators
-    res = re.match("\s*(\S+)\s*=\s*(\d+)\s+to\s+(\d+)\s*", args)
+    res = re.match("\s*(\S+)\s*=\s*(.+)\s+to\s+(.+)\s*", args)
     start_val = str(eval(vars_to_vals_for(res.group(2))))
     end_val = str(eval(vars_to_vals_for(res.group(3))))
 
@@ -188,6 +193,7 @@ def basic_next():
 
 
 
+#function for executing BASIC command
 def execute(cmd, line):
     global program
     command, args = cmd
@@ -195,10 +201,10 @@ def execute(cmd, line):
     if (command == ""): return -1
     elif (command == "input"):  basic_input(args);  return 0
     elif (command == "print"):  basic_print(args);  return 0
-    elif (command == "goto"):   return basic_goto(args)
+    elif (command == "goto"):   return basic_goto(str(args))
     elif (command == "end"):   return -1
     elif (command == "let"):    basic_let(args);    return 0
-    elif (command == "if"):     return basic_if(args)
+    elif (command == "if"):     return basic_if(args, line)
     elif (command == "repeat"): basic_repeat(line); return 0
     elif (command == "until"):  return basic_until(args)
     elif (command == "while"):  return basic_while(args, line)
@@ -209,6 +215,7 @@ def execute(cmd, line):
 
 
 
+#function for running the program
 def run():
     global program
     if 'program' not in globals():
@@ -228,6 +235,7 @@ def run():
 
 
 
+#function for changing the numeration of the program (10, 20...)
 def renum():
     global program
     if 'program' not in globals():
@@ -243,7 +251,7 @@ def renum():
     for line in prog_list:
         cmd, arg = program[line]
         if cmd == "goto":
-            arg = new_order[program[line][1]]
+            arg = new_order[int(program[line][1])]
         res = re.search("goto\s+(\d+)", str(arg))
         if res != None:
             new_line = res.group(1)
@@ -255,6 +263,7 @@ def renum():
 
 
 
+#function for creating the new project
 def new():
     global program
     global repeat_stack
@@ -269,6 +278,7 @@ def new():
 
 
 
+#function for printing the list of commands currently in the program
 def list_prog():
     global program
     if 'program' not in globals():
@@ -282,6 +292,7 @@ def list_prog():
 
 
 
+#function for parsing command that was not from interpreter
 def repl_cmd(cmd):
     global program
     if 'program' not in globals():
@@ -295,6 +306,7 @@ def repl_cmd(cmd):
 
 
 
+#function for saving current project in the file
 def save(fileName = "main.bas"):
     global program
     if 'program' not in globals():
@@ -304,11 +316,12 @@ def save(fileName = "main.bas"):
     prog_list = [*program]
     prog_list.sort()
     for line in prog_list:
-        file.write(str(line) + " " + program[line][0] + " " + program[line][1] + "\n")
+        file.write(str(line) + " " + str(program[line][0]) + " " + str(program[line][1]) + "\n")
     file.close()
 
 
 
+#main function
 def console():
     while(True):
         cmd = input(">> ")
@@ -324,5 +337,5 @@ def console():
         }.get(res.group(1), lambda x: repl_cmd(res.group(1) + " " + x))(res.group(2))
 
 
-
-console()
+if __name__ == "__main__":
+    console()
